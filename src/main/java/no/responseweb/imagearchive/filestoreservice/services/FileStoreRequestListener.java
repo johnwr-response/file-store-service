@@ -1,4 +1,4 @@
-package no.responseweb.imagearchive.filestoreservice.config.services;
+package no.responseweb.imagearchive.filestoreservice.services;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
