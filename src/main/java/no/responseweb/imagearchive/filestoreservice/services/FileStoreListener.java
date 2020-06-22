@@ -3,7 +3,6 @@ package no.responseweb.imagearchive.filestoreservice.services;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import no.responseweb.imagearchive.filestoredbservice.domain.FilePath;
-import no.responseweb.imagearchive.filestoredbservice.domain.FileStore;
 import no.responseweb.imagearchive.filestoredbservice.mappers.FileItemMapper;
 import no.responseweb.imagearchive.filestoredbservice.mappers.FilePathMapper;
 import no.responseweb.imagearchive.filestoredbservice.mappers.FileStoreMapper;
@@ -16,7 +15,6 @@ import no.responseweb.imagearchive.model.FilePathDto;
 import no.responseweb.imagearchive.model.FileStoreDto;
 import no.responseweb.imagearchive.model.FileStoreRequestDto;
 import org.springframework.jms.annotation.JmsListener;
-import org.springframework.jms.core.JmsTemplate;
 import org.springframework.stereotype.Component;
 
 @Slf4j
@@ -24,8 +22,6 @@ import org.springframework.stereotype.Component;
 @Component
 public class FileStoreListener {
 
-    private final JmsTemplate jmsTemplate;
-    // TODO: Move all database config and executions into separate db module. Then enable these
     private final FileStoreRepository fileStoreRepository;
     private final FilePathRepository filePathRepository;
     private final FileItemRepository fileItemRepository;
@@ -35,32 +31,33 @@ public class FileStoreListener {
 
     @JmsListener(destination = JmsConfig.FILE_STORE_REQUEST_QUEUE)
     public void listen(FileStoreRequestDto fileStoreRequest) {
-        FileStoreDto fileStore = fileStoreRequest.getFileStore();
-        FilePathDto filePath = fileStoreRequest.getFilePath();
-        FileItemDto fileItem = fileStoreRequest.getFileItem();
-        if (filePath.getId() == null) {
-            FileStore byNickname = fileStoreRepository.findByNickname(fileStore.getNickname());
-            log.info("Store: {}", fileStoreMapper.fileStoreToFileStoreDto(byNickname));
-            FilePath createdFilePath = filePathRepository.saveAndFlush(filePathMapper.filePathDtoToFilePath(filePath));
-            fileItem.setFileStorePathId(createdFilePath.getId());
-            filePath = filePathMapper.filePathToFilePathDto(createdFilePath);
-            log.info("Created new sub-path: {}", filePathMapper.filePathToFilePathDto(createdFilePath));
+        FileStoreDto fileStoreDto = fileStoreRequest.getFileStore();
+        FilePathDto filePathDto = fileStoreRequest.getFilePath();
+        FileItemDto fileItemDto = fileStoreRequest.getFileItem();
+        if (filePathDto.getId() == null) {
+            FilePath checkForUpdates = filePathRepository.findByFileStoreIdAndRelativePath(fileStoreDto.getId(), (filePathDto.getRelativePath()!=null?filePathDto.getRelativePath():""));
+            if (checkForUpdates!=null) {
+                filePathDto = filePathMapper.filePathToFilePathDto(checkForUpdates);
+            }
+            filePathDto = filePathMapper.filePathToFilePathDto(filePathRepository.saveAndFlush(filePathMapper.filePathDtoToFilePath(filePathDto)));
+            fileItemDto.setFileStorePathId(filePathDto.getId());
+            log.info("Created new sub-path: {}", fileItemDto);
         }
 
         switch (fileStoreRequest.getFileStoreRequestType()) {
             case DELETE:
-                fileItemRepository.delete(fileItemMapper.fileItemDtoToFileItem(fileItem));
-                log.info("Deleted this {} {} {}. FileStoreRequest: {}", fileStore.getLocalBaseUri(), filePath.getRelativePath(), fileItem.getFilename(), fileStoreRequest);
+                fileItemRepository.delete(fileItemMapper.fileItemDtoToFileItem(fileItemDto));
+                log.info("Deleted this {} {} {}. FileStoreRequest: {}", fileStoreDto.getLocalBaseUri(), filePathDto.getRelativePath(), fileItemDto.getFilename(), fileStoreRequest);
                 break;
             case INSERT:
-                fileItemRepository.saveAndFlush(fileItemMapper.fileItemDtoToFileItem(fileItem));
-                log.info("Inserted this {} {} {}. FileStoreRequest: {}", fileStore.getLocalBaseUri(), filePath.getRelativePath(), fileItem.getFilename(), fileStoreRequest);
+                FileItemDto insertedFileItemDto = fileItemMapper.fileItemToFileItemDto(fileItemRepository.save(fileItemMapper.fileItemDtoToFileItem(fileItemDto)));
+                log.info("Inserted this {} {} {}. FileStoreRequest: {}", fileStoreDto.getLocalBaseUri(), filePathDto.getRelativePath(), fileItemDto.getFilename(), fileStoreRequest);
                 break;
             case UPDATE:
-                log.info("Unmapped: {}", fileItem);
-                log.info("Mapped: {}", fileItemMapper.fileItemDtoToFileItem(fileItem).getLastModifiedDate());
-                fileItemRepository.saveAndFlush(fileItemMapper.fileItemDtoToFileItem(fileItem));
-                log.info("Updated this {} {} {}. FileStoreRequest: {}", fileStore.getLocalBaseUri(), filePath.getRelativePath(), fileItem.getFilename(), fileStoreRequest);
+                log.info("Unmapped: {}", fileItemDto);
+                log.info("Mapped Created: {}, Updated: {}", fileItemMapper.fileItemDtoToFileItem(fileItemDto).getCreatedDate(), fileItemMapper.fileItemDtoToFileItem(fileItemDto).getLastModifiedDate());
+                FileItemDto updatedFileItemDto = fileItemMapper.fileItemToFileItemDto(fileItemRepository.save(fileItemMapper.fileItemDtoToFileItem(fileItemDto)));
+                log.info("Updated this {} {} {}. FileStoreRequest: {}", fileStoreDto.getLocalBaseUri(), filePathDto.getRelativePath(), fileItemDto.getFilename(), fileStoreRequest);
                 break;
             default:
                 break;
