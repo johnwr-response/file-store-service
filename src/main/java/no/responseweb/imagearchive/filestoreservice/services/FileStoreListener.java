@@ -49,13 +49,18 @@ public class FileStoreListener {
 
         switch (fileStoreRequest.getFileStoreRequestType()) {
             case DELETE:
-                log.info("Delete this {} {} {}. FileStoreRequest: {}", fileStore.getBaseUri(), filePath.getRelativePath(), fileItem.getFilename(), fileStoreRequest);
+                fileItemRepository.delete(fileItemMapper.fileItemDtoToFileItem(fileItem));
+                log.info("Deleted this {} {} {}. FileStoreRequest: {}", fileStore.getLocalBaseUri(), filePath.getRelativePath(), fileItem.getFilename(), fileStoreRequest);
                 break;
             case INSERT:
-                log.info("Insert this {} {} {}. FileStoreRequest: {}", fileStore.getBaseUri(), filePath.getRelativePath(), fileItem.getFilename(), fileStoreRequest);
+                fileItemRepository.saveAndFlush(fileItemMapper.fileItemDtoToFileItem(fileItem));
+                log.info("Inserted this {} {} {}. FileStoreRequest: {}", fileStore.getLocalBaseUri(), filePath.getRelativePath(), fileItem.getFilename(), fileStoreRequest);
                 break;
             case UPDATE:
-                log.info("Update this {} {} {}. FileStoreRequest: {}", fileStore.getBaseUri(), filePath.getRelativePath(), fileItem.getFilename(), fileStoreRequest);
+                log.info("Unmapped: {}", fileItem);
+                log.info("Mapped: {}", fileItemMapper.fileItemDtoToFileItem(fileItem).getLastModifiedDate());
+                fileItemRepository.saveAndFlush(fileItemMapper.fileItemDtoToFileItem(fileItem));
+                log.info("Updated this {} {} {}. FileStoreRequest: {}", fileStore.getLocalBaseUri(), filePath.getRelativePath(), fileItem.getFilename(), fileStoreRequest);
                 break;
             default:
                 break;
