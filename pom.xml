@@ -27,8 +27,16 @@
 			<artifactId>spring-boot-starter-data-jpa</artifactId>
 		</dependency>
 		<dependency>
+			<groupId>org.springframework.cloud</groupId>
+			<artifactId>spring-cloud-starter-openfeign</artifactId>
+		</dependency>
+		<dependency>
 			<groupId>no.responseweb.imagearchive</groupId>
 			<artifactId>file-store-dbutils</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>com.drewnoakes</groupId>
+			<artifactId>metadata-extractor</artifactId>
 		</dependency>
 		<dependency>
 			<groupId>com.h2database</groupId>
