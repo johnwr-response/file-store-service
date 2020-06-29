@@ -8,9 +8,7 @@ import org.springframework.context.annotation.Configuration;
 @Getter
 @Setter
 @Configuration
-@ConfigurationProperties(prefix = "response.walker.status", ignoreUnknownFields = false)
-public class ResponseWalkerStatusProperties {
-    private int cutoffMinutes = 30;
-    private int disconnectSeconds = 30;
-    private int globalStoreRefreshMinutes = 3600*24;
+@ConfigurationProperties(prefix = "response.filestore", ignoreUnknownFields = false)
+public class ResponseFileStoreProperties {
+    private int thumbnailSize = 200;
 }

@@ -7,12 +7,14 @@ import com.drew.metadata.Metadata;
 import com.drew.metadata.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import net.coobird.thumbnailator.Thumbnails;
 import no.responseweb.imagearchive.filestoredbservice.domain.*;
 import no.responseweb.imagearchive.filestoredbservice.mappers.FileItemMapper;
 import no.responseweb.imagearchive.filestoredbservice.mappers.FilePathMapper;
 import no.responseweb.imagearchive.filestoredbservice.mappers.FileStoreMapper;
 import no.responseweb.imagearchive.filestoredbservice.repositories.*;
 import no.responseweb.imagearchive.filestoreservice.config.JmsConfig;
+import no.responseweb.imagearchive.filestoreservice.config.ResponseFileStoreProperties;
 import no.responseweb.imagearchive.filestoreservice.config.ResponseWalkerStatusProperties;
 import no.responseweb.imagearchive.model.*;
 import org.springframework.jms.annotation.JmsListener;
@@ -21,8 +23,10 @@ import org.springframework.stereotype.Component;
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Slf4j
 @RequiredArgsConstructor
@@ -41,6 +45,7 @@ public class FileStoreListener {
     private final ImageMetadataValueRepository imageMetadataValueRepository;
     private final StatusWalkerRepository statusWalkerRepository;
 
+    private final ResponseFileStoreProperties responseFileStoreProperties;
     private final ResponseWalkerStatusProperties responseWalkerStatusProperties;
 
     private final FileStoreFetcherService fileStoreFetcherService;
@@ -63,14 +68,26 @@ public class FileStoreListener {
             statusWalker.setLastActiveDate(LocalDateTime.now());
         }
         statusWalkerRepository.save(statusWalker);
+        disconnectOldStatusWalkers(walkerStatusReportDto);
         deleteOldStatusWalkers(walkerStatusReportDto);
+
+    }
+    private void disconnectOldStatusWalkers(WalkerStatusReportDto walkerStatusReportDto) {
+        List<StatusWalker> disconnectedWalkers = statusWalkerRepository.findAllByFileStoreIdAndLastActiveDateIsBefore(
+                walkerStatusReportDto.getFileStoreId(),
+                LocalDateTime.now().minusSeconds(responseWalkerStatusProperties.getDisconnectSeconds())
+        );
+        disconnectedWalkers.forEach(statusWalker -> {
+            statusWalker.setReady(false);
+            statusWalkerRepository.save(statusWalker);
+        });
 
     }
     private void deleteOldStatusWalkers(WalkerStatusReportDto walkerStatusReportDto) {
         statusWalkerRepository.deleteInBatch(
                 statusWalkerRepository.findAllByFileStoreIdAndLastActiveDateIsBefore(
                         walkerStatusReportDto.getFileStoreId(),
-                        LocalDateTime.now().minusHours(responseWalkerStatusProperties.getCutoffHours())
+                        LocalDateTime.now().minusMinutes(responseWalkerStatusProperties.getCutoffMinutes())
                 )
         );
     }
@@ -148,10 +165,34 @@ public class FileStoreListener {
                         log.info("File.name: {}, Directory.name: {}, Tag.type: {}, Tag.name: {}, Tag.description: {}", fileItemDto.getFilename(), currDir.getName(), currTag.getTagDec(), currTag.getKeyName(), currValue.getValue());
                     }
                 }
+
+                // create and store thumbnail
+                int configuredThumbSize = responseFileStoreProperties.getThumbnailSize();
+
+                ByteArrayOutputStream os = new ByteArrayOutputStream();
+
+                if (image.getHeight()>image.getWidth()) {
+                    Thumbnails.of(image)
+                            .height(configuredThumbSize)
+                            .outputFormat("png")
+                            .toOutputStream(os);
+                } else {
+                    Thumbnails.of(image)
+                            .width(configuredThumbSize)
+                            .outputFormat("png")
+                            .toOutputStream(os);
+                }
+                fileItemDto.setThumbnail(os.toByteArray());
+
+                fileItemRepository.save(fileItemMapper.fileItemDtoToFileItem(fileItemDto));
+
             } else {
                 log.info("Not an Image: {}", fileItemDto.getFilename());
             }
-            StatusWalker statusWalker = statusWalkerRepository.getOne(fileStoreRequest.getWalkerJobDto().getWalkerInstanceToken());
+            StatusWalker statusWalker = statusWalkerRepository.findFirstByWalkerInstanceTokenAndFileStoreId(
+                    fileStoreRequest.getWalkerJobDto().getWalkerInstanceToken(),
+                    fileStoreDto.getId()
+            );
             statusWalker.setLastActiveDate(LocalDateTime.now());
             statusWalkerRepository.save(statusWalker);
         }
