@@ -11,4 +11,5 @@ import org.springframework.context.annotation.Configuration;
 @ConfigurationProperties(prefix = "response.filestore", ignoreUnknownFields = false)
 public class ResponseFileStoreProperties {
     private int thumbnailSize = 200;
+    private boolean thumbnailGenerate = false;
 }

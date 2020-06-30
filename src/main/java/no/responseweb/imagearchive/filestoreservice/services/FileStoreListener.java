@@ -95,107 +95,129 @@ public class FileStoreListener {
     // TODO: Reduce Cognitive Complexity
     @JmsListener(destination = JmsConfig.FILE_STORE_REQUEST_QUEUE)
     public void listen(FileStoreRequestDto fileStoreRequest) throws IOException, ImageProcessingException {
-        FileStoreDto fileStoreDto = fileStoreRequest.getFileStore();
-        FilePathDto filePathDto = fileStoreRequest.getFilePath();
-        FileItemDto fileItemDto = fileStoreRequest.getFileItem();
-        if (fileStoreDto.getId() == null) {
-            fileStoreDto.setLatestRefresh(LocalDateTime.now());
-            fileStoreDto = fileStoreMapper.fileStoreToFileStoreDto(
-                    fileStoreRepository.save(
-                            fileStoreMapper.fileStoreDtoToFileStore(fileStoreDto)
-                    )
-            );
-        }
-        if (filePathDto.getId() == null) {
-            FilePath checkForUpdates = filePathRepository.findByFileStoreIdAndRelativePath(fileStoreDto.getId(), (filePathDto.getRelativePath()!=null?filePathDto.getRelativePath():""));
-            if (checkForUpdates!=null) {
-                filePathDto = filePathMapper.filePathToFilePathDto(checkForUpdates);
+        if (fileStoreRequest != null && fileStoreRequest.getFileStore() != null && fileStoreRequest.getFilePath() != null && fileStoreRequest.getFileItem() != null) {
+            FileStoreDto fileStoreDto = fileStoreRequest.getFileStore();
+            FilePathDto filePathDto = fileStoreRequest.getFilePath();
+            FileItemDto fileItemDto = fileStoreRequest.getFileItem();
+
+            // Load data with existing IDs. (When rebuilding database)
+            if (fileStoreDto.getId()!=null && fileStoreRepository.findFirstById(fileStoreDto.getId())==null) {
+                fileStoreRepository.saveAndFlush(fileStoreMapper.fileStoreDtoToFileStore(fileStoreDto));
             }
-            filePathDto = filePathMapper.filePathToFilePathDto(filePathRepository.saveAndFlush(filePathMapper.filePathDtoToFilePath(filePathDto)));
-            fileItemDto.setFileStorePathId(filePathDto.getId());
-            log.info("Created new sub-path: {}", fileItemDto);
-        }
+            if (filePathDto.getId()!=null && filePathRepository.findFirstById(filePathDto.getId())==null) {
+                filePathRepository.saveAndFlush(filePathMapper.filePathDtoToFilePath(filePathDto));
+            }
+            if (fileItemDto.getId()!=null && fileItemRepository.findFirstById(fileItemDto.getId())==null) {
+                fileItemRepository.saveAndFlush(fileItemMapper.fileItemDtoToFileItem(fileItemDto));
+            }
 
-        switch (fileStoreRequest.getFileStoreRequestType()) {
-            case DELETE:
-                fileItemRepository.delete(fileItemMapper.fileItemDtoToFileItem(fileItemDto));
-                break;
-            case INSERT:
-            case UPDATE:
-                fileItemDto = fileItemMapper.fileItemToFileItemDto(fileItemRepository.save(fileItemMapper.fileItemDtoToFileItem(fileItemDto)));
-                break;
-            default:
-                break;
-        }
-        // fetch file-item, extract metadata, save to database
-        if (fileItemDto.getId()!=null) {
-            byte[] downloadedBytes = fileStoreFetcherService.fetchFile(fileItemDto.getId());
-            log.info("File: {}, Size: {}", fileItemDto.getFilename(), downloadedBytes.length);
-            BufferedImage image = ImageIO.read(new ByteArrayInputStream(downloadedBytes));
-            if (image!=null) {
-                Metadata metadata = ImageMetadataReader.readMetadata(new ByteArrayInputStream(downloadedBytes));
-                for (Directory directory : metadata.getDirectories()) {
-                    ImageMetadataDirectory currDir = imageMetadataDirectoryRepository.findFirstByName(directory.getName());
-                    if (currDir == null) {
-                        currDir = imageMetadataDirectoryRepository.save(ImageMetadataDirectory.builder()
-                                .collectionId(imageMetadataCollectionRepository.findFirstByName("unset").getId())
-                                .name(directory.getName())
-                                .build());
-                    }
-                    for (Tag tag : directory.getTags()) {
-                        ImageMetadataTag currTag = imageMetadataTagRepository.findFirstByDirectoryIdAndKeyName(currDir.getId(), tag.getTagName());
-                        if (currTag == null) {
-                            currTag = imageMetadataTagRepository.save(ImageMetadataTag.builder()
-                                    .directoryId(currDir.getId())
-                                    .keyName(tag.getTagName())
-                                    .tagDec(tag.getTagType())
-                                    .build());
-                        }
-                        ImageMetadataValue currValue = imageMetadataValueRepository.findFirstByTagIdAndFileItemId(currTag.getId(), fileItemDto.getId());
-                        if (currValue == null) {
-                            currValue = imageMetadataValueRepository.save(ImageMetadataValue.builder()
-                                    .tagId(currTag.getId())
-                                    .fileItemId(fileItemDto.getId())
-                                    .value(tag.getDescription())
-                                    .build());
-                        } else if (!currValue.getValue().equals(tag.getDescription())) {
-                            currValue.setValue(tag.getDescription());
-                            imageMetadataValueRepository.save(currValue);
-                        }
-                        log.info("File.name: {}, Directory.name: {}, Tag.type: {}, Tag.name: {}, Tag.description: {}", fileItemDto.getFilename(), currDir.getName(), currTag.getTagDec(), currTag.getKeyName(), currValue.getValue());
-                    }
+            if (fileStoreDto.getId() == null) {
+                fileStoreDto.setLatestRefresh(LocalDateTime.now());
+                fileStoreDto = fileStoreMapper.fileStoreToFileStoreDto(
+                        fileStoreRepository.saveAndFlush(
+                                fileStoreMapper.fileStoreDtoToFileStore(fileStoreDto)
+                        )
+                );
+            }
+            if (filePathDto.getId() == null) {
+                FilePath checkForUpdates = filePathRepository.findByFileStoreIdAndRelativePath(fileStoreDto.getId(), (filePathDto.getRelativePath()!=null?filePathDto.getRelativePath():""));
+                if (checkForUpdates!=null) {
+                    filePathDto = filePathMapper.filePathToFilePathDto(checkForUpdates);
                 }
+                filePathDto = filePathMapper.filePathToFilePathDto(filePathRepository.saveAndFlush(filePathMapper.filePathDtoToFilePath(filePathDto)));
+                fileItemDto.setFileStorePathId(filePathDto.getId());
+                log.info("Created new sub-path: {}", fileItemDto);
+            }
 
-                // create and store thumbnail
-                int configuredThumbSize = responseFileStoreProperties.getThumbnailSize();
+            switch (fileStoreRequest.getFileStoreRequestType()) {
+                case DELETE:
+                    fileItemRepository.delete(fileItemMapper.fileItemDtoToFileItem(fileItemDto));
+                    break;
+                case INSERT:
+                    if (fileItemDto.getId() == null) {
+                        fileItemDto = fileItemMapper.fileItemToFileItemDto(fileItemRepository.saveAndFlush(fileItemMapper.fileItemDtoToFileItem(fileItemDto)));
+                    }
+                    break;
+                case UPDATE:
+                    fileItemDto = fileItemMapper.fileItemToFileItemDto(fileItemRepository.saveAndFlush(fileItemMapper.fileItemDtoToFileItem(fileItemDto)));
+                    break;
+                default:
+                    break;
+            }
+            // fetch file-item, extract metadata, save to database
+            if (fileItemDto.getId()!=null) {
+                fileItemDto = fileItemMapper.fileItemToFileItemDto(fileItemRepository.findFirstById(fileItemDto.getId()));
+                byte[] downloadedBytes = fileStoreFetcherService.fetchFile(fileItemDto.getId());
+                log.info("File: {}, Size: {}", fileItemDto.getFilename(), downloadedBytes.length);
+                BufferedImage image = ImageIO.read(new ByteArrayInputStream(downloadedBytes));
+                if (image!=null) {
+                    Metadata metadata = ImageMetadataReader.readMetadata(new ByteArrayInputStream(downloadedBytes));
+                    for (Directory directory : metadata.getDirectories()) {
+                        ImageMetadataDirectory currDir = imageMetadataDirectoryRepository.findFirstByName(directory.getName());
+                        if (currDir == null) {
+                            currDir = imageMetadataDirectoryRepository.save(ImageMetadataDirectory.builder()
+                                    .collectionId(imageMetadataCollectionRepository.findFirstByName("unset").getId())
+                                    .name(directory.getName())
+                                    .build());
+                        }
+                        for (Tag tag : directory.getTags()) {
+                            ImageMetadataTag currTag = imageMetadataTagRepository.findFirstByDirectoryIdAndKeyName(currDir.getId(), tag.getTagName());
+                            if (currTag == null) {
+                                currTag = imageMetadataTagRepository.save(ImageMetadataTag.builder()
+                                        .directoryId(currDir.getId())
+                                        .keyName(tag.getTagName())
+                                        .tagDec(tag.getTagType())
+                                        .build());
+                            }
+                            ImageMetadataValue currValue = imageMetadataValueRepository.findFirstByTagIdAndFileItemId(currTag.getId(), fileItemDto.getId());
+                            if (currValue == null) {
+                                currValue = imageMetadataValueRepository.save(ImageMetadataValue.builder()
+                                        .tagId(currTag.getId())
+                                        .fileItemId(fileItemDto.getId())
+                                        .value(tag.getDescription())
+                                        .build());
+                            } else if (!currValue.getValue().equals(tag.getDescription())) {
+                                currValue.setValue(tag.getDescription());
+                                imageMetadataValueRepository.save(currValue);
+                            }
+                            log.info("File.name: {}, Directory.name: {}, Tag.type: {}, Tag.name: {}, Tag.description: {}", fileItemDto.getFilename(), currDir.getName(), currTag.getTagDec(), currTag.getKeyName(), currValue.getValue());
+                        }
+                    }
 
-                ByteArrayOutputStream os = new ByteArrayOutputStream();
+                    if (responseFileStoreProperties.isThumbnailGenerate()) {
+                        // create and store thumbnail
+                        int configuredThumbSize = responseFileStoreProperties.getThumbnailSize();
 
-                if (image.getHeight()>image.getWidth()) {
-                    Thumbnails.of(image)
-                            .height(configuredThumbSize)
-                            .outputFormat("png")
-                            .toOutputStream(os);
+                        ByteArrayOutputStream os = new ByteArrayOutputStream();
+
+                        if (image.getHeight()>image.getWidth()) {
+                            Thumbnails.of(image)
+                                    .height(configuredThumbSize)
+                                    .outputFormat("png")
+                                    .toOutputStream(os);
+                        } else {
+                            Thumbnails.of(image)
+                                    .width(configuredThumbSize)
+                                    .outputFormat("png")
+                                    .toOutputStream(os);
+                        }
+                        fileItemDto.setThumbnail(os.toByteArray());
+
+                        fileItemRepository.save(fileItemMapper.fileItemDtoToFileItem(fileItemDto));
+                    }
+
                 } else {
-                    Thumbnails.of(image)
-                            .width(configuredThumbSize)
-                            .outputFormat("png")
-                            .toOutputStream(os);
+                    log.info("Not an Image: {}", fileItemDto.getFilename());
                 }
-                fileItemDto.setThumbnail(os.toByteArray());
-
-                fileItemRepository.save(fileItemMapper.fileItemDtoToFileItem(fileItemDto));
-
-            } else {
-                log.info("Not an Image: {}", fileItemDto.getFilename());
+                StatusWalker statusWalker = statusWalkerRepository.findFirstByWalkerInstanceTokenAndFileStoreId(
+                        fileStoreRequest.getWalkerJobDto().getWalkerInstanceToken(),
+                        fileStoreDto.getId()
+                );
+                statusWalker.setLastActiveDate(LocalDateTime.now());
+                statusWalkerRepository.save(statusWalker);
             }
-            StatusWalker statusWalker = statusWalkerRepository.findFirstByWalkerInstanceTokenAndFileStoreId(
-                    fileStoreRequest.getWalkerJobDto().getWalkerInstanceToken(),
-                    fileStoreDto.getId()
-            );
-            statusWalker.setLastActiveDate(LocalDateTime.now());
-            statusWalkerRepository.save(statusWalker);
         }
+
     }
 
 }
