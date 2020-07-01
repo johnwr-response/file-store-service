@@ -16,7 +16,7 @@ import javax.jms.ConnectionFactory;
 public class JmsConfig {
     public static final String FILE_STORE_REQUEST_QUEUE = "file-store-request";
     public static final String FILE_STORE_WALKER_STATUS_QUEUE = "file-store-walker-status";
-    public static final String FILE_STORE_WALKER_JOB_TOPIC = "file-store-walker-job";
+    public static final String IMAGE_METADATA_EXTRACTOR_JOB_QUEUE = "image-metadata-extractor-job";
 
     @Bean // Serialize message content to json using TextMessage
     public MessageConverter jacksonJmsMessageConverter(ObjectMapper objectMapper) {
