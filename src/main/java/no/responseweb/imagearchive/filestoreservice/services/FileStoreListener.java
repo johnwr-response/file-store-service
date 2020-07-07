@@ -2,15 +2,14 @@ package no.responseweb.imagearchive.filestoreservice.services;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import no.responseweb.imagearchive.filestoredbservice.domain.FileEntity;
 import no.responseweb.imagearchive.filestoredbservice.domain.FilePath;
 import no.responseweb.imagearchive.filestoredbservice.domain.StatusWalker;
+import no.responseweb.imagearchive.filestoredbservice.mappers.FileEntityMapper;
 import no.responseweb.imagearchive.filestoredbservice.mappers.FileItemMapper;
 import no.responseweb.imagearchive.filestoredbservice.mappers.FilePathMapper;
 import no.responseweb.imagearchive.filestoredbservice.mappers.FileStoreMapper;
-import no.responseweb.imagearchive.filestoredbservice.repositories.FileItemRepository;
-import no.responseweb.imagearchive.filestoredbservice.repositories.FilePathRepository;
-import no.responseweb.imagearchive.filestoredbservice.repositories.FileStoreRepository;
-import no.responseweb.imagearchive.filestoredbservice.repositories.StatusWalkerRepository;
+import no.responseweb.imagearchive.filestoredbservice.repositories.*;
 import no.responseweb.imagearchive.filestoreservice.config.JmsConfig;
 import no.responseweb.imagearchive.filestoreservice.config.ResponseWalkerStatusProperties;
 import no.responseweb.imagearchive.model.*;
@@ -32,6 +31,8 @@ public class FileStoreListener {
     private final FilePathMapper filePathMapper;
     private final FileItemRepository fileItemRepository;
     private final FileItemMapper fileItemMapper;
+    private final FileEntityRepository fileEntityRepository;
+    private final FileEntityMapper fileEntityMapper;
     private final StatusWalkerRepository statusWalkerRepository;
 
     private final ResponseWalkerStatusProperties responseWalkerStatusProperties;
@@ -88,6 +89,13 @@ public class FileStoreListener {
             FilePathDto filePathDto = fileStoreRequest.getFilePath();
             FileItemDto fileItemDto = fileStoreRequest.getFileItem();
 
+            if (fileItemDto.getFileEntityId()==null) {
+                FileEntity fileEntity = fileEntityRepository.saveAndFlush(FileEntity.builder()
+                        .id(fileItemDto.getId())
+                        .build());
+                fileItemDto.setFileEntityId(fileEntity.getId());
+            }
+
             // Load data with existing IDs. (When rebuilding database)
             if (fileStoreDto.getId()!=null && fileStoreRepository.findFirstById(fileStoreDto.getId())==null) {
                 fileStoreRepository.saveAndFlush(fileStoreMapper.fileStoreDtoToFileStore(fileStoreDto));
@@ -120,6 +128,7 @@ public class FileStoreListener {
 
             switch (fileStoreRequest.getFileStoreRequestType()) {
                 case DELETE:
+                    fileEntityRepository.deleteById(fileItemDto.getFileEntityId());
                     fileItemRepository.delete(fileItemMapper.fileItemDtoToFileItem(fileItemDto));
                     log.info("Deleted file: {}", fileItemDto);
                     break;
@@ -139,11 +148,17 @@ public class FileStoreListener {
             // fetch file-item, extract metadata, save to database
             if (fileItemDto.getId()!=null) {
                 jmsTemplate.convertAndSend(
-                        JmsConfig.IMAGE_METADATA_EXTRACTOR_JOB_QUEUE,
-                        fileItemMapper.fileItemToFileItemDto(
-                            fileItemRepository.findFirstById(fileItemDto.getId())
-                        )
+                        JmsConfig.FILE_PROCESSING_JOB_QUEUE, FileProcessingJobDto.builder()
+                                .fileStoreRequestType(fileStoreRequest.getFileStoreRequestType())
+                                .config(new FileProcessingJobForwarderConfig(
+                                        FileProcessingJobForwarderConfig.Config.IMAGES))
+                                .fileItemDto(
+                                        fileItemMapper.fileItemToFileItemDto(
+                                                fileItemRepository.findFirstById(fileItemDto.getId())
+                                        ))
+                                .build()
                 );
+
                 StatusWalker statusWalker = statusWalkerRepository.findFirstByWalkerInstanceTokenAndFileStoreId(
                         fileStoreRequest.getWalkerJobDto().getWalkerInstanceToken(),
                         fileStoreDto.getId()
